@@ -956,20 +956,52 @@ namespace nvhttp {
    * @param response HTTP response object to populate.
    * @param request HTTP request data from the client.
    */
+  void applist(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
+
+    pt::ptree tree;
+
+    auto g = util::fail_guard([&]() {
+      std::ostringstream data;
+
+      pt::write_xml(data, tree);
+      response->write(data.str());
+      response->close_connection_after_response = true;
+    });
+
+    auto &apps = tree.add_child("root", pt::ptree {});
+
+    apps.put("<xmlattr>.status_code", 200);
+
+    for (auto &proc : proc::proc.get_apps()) {
+      pt::ptree app;
+
+      app.put("IsHdrSupported"s, video::active_hevc_mode >= 3 ? 1 : 0);
+      app.put("AppTitle"s, proc.name);
+      app.put("ID", proc.id);
+
+      apps.push_back(std::make_pair("App", std::move(app)));
+    }
+  }
+
   /**
-   * @brief Reports where the focused application is expecting text.
-   * @param response The response to send.
-   * @param request The request.
+   * @brief Report where the focused application is expecting text.
    *
    * A phone's on-screen keyboard covers half the picture, and the client has no way of knowing
    * which half matters. The host does. Coordinates are fractions of the streamed display so the
    * client needs to know nothing about resolutions; an empty body means the focused application
    * does not report an insertion point, which is most of them, and the client should fall back
    * to whatever it knows on its own.
+   *
+   * Served only over HTTPS, so it reaches paired and enabled clients alone. Where someone is
+   * typing, and the pointer position it falls back to, describe what the user is doing closely
+   * enough that they belong behind the same verification as the rest of the session.
+   *
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
    */
-  template<class T>
-  void caret(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
-    print_req<T>(request);
+  void caret(resp_https_t response, req_https_t request) {
+    print_req<SunshineHTTPS>(request);
 
     SimpleWeb::CaseInsensitiveMultimap headers;
     headers.emplace("Content-Type", "application/json");
@@ -998,34 +1030,6 @@ namespace nvhttp {
 #endif
 
     response->write(SimpleWeb::StatusCode::success_ok, "{}", headers);
-  }
-
-  void applist(resp_https_t response, req_https_t request) {
-    print_req<SunshineHTTPS>(request);
-
-    pt::ptree tree;
-
-    auto g = util::fail_guard([&]() {
-      std::ostringstream data;
-
-      pt::write_xml(data, tree);
-      response->write(data.str());
-      response->close_connection_after_response = true;
-    });
-
-    auto &apps = tree.add_child("root", pt::ptree {});
-
-    apps.put("<xmlattr>.status_code", 200);
-
-    for (auto &proc : proc::proc.get_apps()) {
-      pt::ptree app;
-
-      app.put("IsHdrSupported"s, video::active_hevc_mode >= 3 ? 1 : 0);
-      app.put("AppTitle"s, proc.name);
-      app.put("ID", proc.id);
-
-      apps.push_back(std::make_pair("App", std::move(app)));
-    }
   }
 
   /**
@@ -1409,7 +1413,7 @@ namespace nvhttp {
       pair<SunshineHTTPS>(add_cert, resp, req);
     };
     https_server.resource["^/applist$"]["GET"] = applist;
-    https_server.resource["^/caret$"]["GET"] = caret<SunshineHTTPS>;
+    https_server.resource["^/caret$"]["GET"] = caret;
     https_server.resource["^/appasset$"]["GET"] = appasset;
     https_server.resource["^/launch$"]["GET"] = [&host_audio](auto resp, auto req) {
       launch(host_audio, resp, req);
@@ -1425,8 +1429,6 @@ namespace nvhttp {
 
     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
-    http_server.resource["^/caret$"]["GET"] = caret<SimpleWeb::HTTP>;  // Plain HTTP as well: the video stream beside it is not encrypted either, a caret rectangle
-    // is not the secret here, and it saves a phone the paired-certificate handshake every poll.
     http_server.resource["^/pair$"]["GET"] = [&add_cert](auto resp, auto req) {
       pair<SimpleWeb::HTTP>(add_cert, resp, req);
     };
