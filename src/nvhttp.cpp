@@ -31,6 +31,9 @@
 #include "logging.h"
 #include "network.h"
 #include "nvhttp.h"
+#ifdef __APPLE__
+  #include "src/platform/macos/misc.h"
+#endif
 #include "platform/common.h"
 #include "process.h"
 #include "rtsp.h"
@@ -1243,6 +1246,50 @@ namespace nvhttp {
    * @param response HTTP response object to populate.
    * @param request HTTP request data from the client.
    */
+  /**
+   * @brief Reports where the focused application is expecting text.
+   * @param response The response to send.
+   * @param request The request.
+   *
+   * A phone's on-screen keyboard covers half the picture, and the client has no way of knowing
+   * which half matters. The host does. Coordinates are fractions of the streamed display so the
+   * client needs to know nothing about resolutions; an empty body means the focused application
+   * does not report an insertion point, which is most of them, and the client should fall back
+   * to whatever it knows on its own.
+   */
+  template<class T>
+  void caret(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
+    print_req<T>(request);
+
+    SimpleWeb::CaseInsensitiveMultimap headers;
+    headers.emplace("Content-Type", "application/json");
+
+#ifdef __APPLE__
+    // The caret when the focused application will say, the pointer when it will not — which is
+    // most of them. The pointer is where you clicked to start typing, so it is close enough to
+    // be worth moving the picture for, and in trackpad mode it is the only thing the client
+    // cannot work out for itself.
+    if (const auto rect = platf::focused_caret()) {
+      const auto body = "{\"x\":" + std::to_string((*rect)[0]) +
+                        ",\"y\":" + std::to_string((*rect)[1]) +
+                        ",\"w\":" + std::to_string((*rect)[2]) +
+                        ",\"h\":" + std::to_string((*rect)[3]) +
+                        ",\"source\":\"caret\"}";
+      response->write(SimpleWeb::StatusCode::success_ok, body, headers);
+      return;
+    }
+    if (const auto point = platf::pointer_location()) {
+      const auto body = "{\"x\":" + std::to_string((*point)[0]) +
+                        ",\"y\":" + std::to_string((*point)[1]) +
+                        ",\"w\":0,\"h\":0,\"source\":\"pointer\"}";
+      response->write(SimpleWeb::StatusCode::success_ok, body, headers);
+      return;
+    }
+#endif
+
+    response->write(SimpleWeb::StatusCode::success_ok, "{}", headers);
+  }
+
   void applist(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1644,6 +1691,7 @@ namespace nvhttp {
       pair<SunshineHTTPS>(resp, req);
     };
     https_server.resource["^/applist$"]["GET"] = applist;
+    https_server.resource["^/caret$"]["GET"] = caret<SunshineHTTPS>;
     https_server.resource["^/appasset$"]["GET"] = appasset;
     https_server.resource["^/launch$"]["GET"] = [&host_audio](auto resp, auto req) {
       launch(host_audio, resp, req);
@@ -1659,6 +1707,8 @@ namespace nvhttp {
 
     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
+    http_server.resource["^/caret$"]["GET"] = caret<SimpleWeb::HTTP>;  // Plain HTTP as well: the video stream beside it is not encrypted either, a caret rectangle
+    // is not the secret here, and it saves a phone the paired-certificate handshake every poll.
     http_server.resource["^/pair$"]["GET"] = [](auto resp, auto req) {
       pair<SimpleWeb::HTTP>(resp, req);
     };
