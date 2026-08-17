@@ -989,9 +989,9 @@ namespace nvhttp {
    *
    * A phone's on-screen keyboard covers half the picture, and the client has no way of knowing
    * which half matters. The host does. Coordinates are fractions of the streamed display so the
-   * client needs to know nothing about resolutions; an empty body means the focused application
-   * does not report an insertion point, which is most of them, and the client should fall back
-   * to whatever it knows on its own.
+   * client needs to know nothing about resolutions, and "source" says whether the answer is the
+   * insertion point itself or the pointer standing in for it. An empty body means neither was
+   * available, and the client should leave the picture where it is.
    *
    * Served only over HTTPS, so it reaches paired and enabled clients alone. Where someone is
    * typing, and the pointer position it falls back to, describe what the user is doing closely
@@ -1006,11 +1006,10 @@ namespace nvhttp {
     SimpleWeb::CaseInsensitiveMultimap headers;
     headers.emplace("Content-Type", "application/json");
 
+    // The caret when the focused application will say where it is, the pointer when it will not,
+    // which is most of them. Accessibility is the only interface that reports an insertion point
+    // and it is macOS-only, so elsewhere the pointer is the whole answer.
 #ifdef __APPLE__
-    // The caret when the focused application will say, the pointer when it will not — which is
-    // most of them. The pointer is where you clicked to start typing, so it is close enough to
-    // be worth moving the picture for, and in trackpad mode it is the only thing the client
-    // cannot work out for itself.
     if (const auto rect = platf::focused_caret()) {
       const auto body = "{\"x\":" + std::to_string((*rect)[0]) +
                         ",\"y\":" + std::to_string((*rect)[1]) +
@@ -1020,6 +1019,11 @@ namespace nvhttp {
       response->write(SimpleWeb::StatusCode::success_ok, body, headers);
       return;
     }
+#endif
+
+    // Where you clicked to start typing, so it is close enough to the field to be worth moving
+    // the picture for, and in trackpad mode it is the only thing the client cannot work out for
+    // itself: it sends relative motion and never learns where the pointer ended up.
     if (const auto point = platf::pointer_location()) {
       const auto body = "{\"x\":" + std::to_string((*point)[0]) +
                         ",\"y\":" + std::to_string((*point)[1]) +
@@ -1027,7 +1031,6 @@ namespace nvhttp {
       response->write(SimpleWeb::StatusCode::success_ok, body, headers);
       return;
     }
-#endif
 
     response->write(SimpleWeb::StatusCode::success_ok, "{}", headers);
   }
