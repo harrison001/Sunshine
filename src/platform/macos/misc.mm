@@ -192,11 +192,13 @@ namespace platf {
     const auto *const begin {display_name.data()};
     const auto *const end {display_name.data() + display_name.size()};
     if (const auto [ptr, ec] {std::from_chars(begin, end, target)}; ec != std::errc {} || ptr != end) {
+      BOOST_LOG(debug) << "Not placing pointer: ["sv << display_name << "] is not a display id"sv;
       return;
     }
 
     const CGRect bounds {CGDisplayBounds(target)};
     if (bounds.size.width <= 0 || bounds.size.height <= 0) {
+      BOOST_LOG(debug) << "Not placing pointer: display ["sv << display_name << "] has no bounds"sv;
       return;
     }
 
@@ -219,10 +221,13 @@ namespace platf {
       }
     }
 
-    CGWarpMouseCursorPosition(CGPointMake(
+    const CGPoint placed {
       bounds.origin.x + bounds.size.width * fraction_x,
       bounds.origin.y + bounds.size.height * fraction_y
-    ));
+    };
+    BOOST_LOG(info) << "Moved the pointer to display ["sv << display_name << "] at ("sv
+                    << placed.x << ',' << placed.y << ')';
+    CGWarpMouseCursorPosition(placed);
     // A warp on its own leaves the system briefly disregarding real movement, which feels like the
     // pointer sticking for a moment straight after a switch.
     CGAssociateMouseAndMouseCursorPosition(true);
