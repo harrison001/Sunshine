@@ -316,6 +316,9 @@ namespace platf {
       return nullptr;
     }
 
+    const auto panel_width {display->av_capture.frameWidth};
+    const auto panel_height {display->av_capture.frameHeight};
+
     display->width = display->av_capture.frameWidth;
     display->height = display->av_capture.frameHeight;
     // We also need set env_width and env_height for absolute mouse coordinates
@@ -327,6 +330,16 @@ namespace platf {
       [display->av_capture setFrameWidth:config.width frameHeight:config.height];
       display->av_capture.pixelFormat = pixel_format;
     }
+
+    // Three sizes are involved and only one of them is visible anywhere else: what the panel has,
+    // what the client asked for, and what this object will tell the rest of Sunshine it produces.
+    // The last is what the encoder is configured from, so it has to match the buffers that
+    // actually arrive.
+    BOOST_LOG(debug) << "Capture geometry: panel "sv << panel_width << 'x' << panel_height
+                     << ", requested "sv << config.width << 'x' << config.height
+                     << ", buffers "sv << display->av_capture.frameWidth << 'x'
+                     << display->av_capture.frameHeight
+                     << ", reporting "sv << display->width << 'x' << display->height;
 
     return display;
   }
