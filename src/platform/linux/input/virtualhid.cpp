@@ -68,6 +68,12 @@ namespace platf {
 
   // Kept beside get_mouse_loc() rather than in misc.cpp, which is where the other two platforms
   // put it, because this is the only Linux translation unit with an X11 connection already set up.
+  void place_pointer_on_display(const std::string &display_name) {
+    // Not implemented here yet. The pointer stays where it was after a display switch, which is
+    // the behaviour every platform had before macOS gained this.
+    (void) display_name;
+  }
+
   std::optional<std::array<double, 2>> pointer_location() {
 #ifdef SUNSHINE_BUILD_X11
     auto *display = XOpenDisplay(nullptr);
