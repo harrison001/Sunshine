@@ -34,18 +34,6 @@ namespace platf {
    * @return {x, y, width, height} in 0..1 of the streamed display, or nothing.
    */
   std::optional<std::array<double, 4>> focused_caret();
-
-  /**
-   * @brief Where the pointer is, as a fraction of the streamed display.
-   *
-   * The fallback for the applications that do not report an insertion point, which is most of
-   * them. It is a good stand-in: you click into a field to type in it, so the pointer is at the
-   * place you are about to type. And it is the only thing that works in trackpad mode, where
-   * the client sends relative motion and has no idea where the pointer ended up.
-   *
-   * @return {x, y} in 0..1 of the streamed display, or nothing when the pointer is on another.
-   */
-  std::optional<std::array<double, 2>> pointer_location();
 }  // namespace platf
 
 namespace dyn {
