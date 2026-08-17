@@ -1301,12 +1301,12 @@ namespace nvhttp {
     // and it is macOS-only, so elsewhere the pointer is the whole answer.
 #ifdef __APPLE__
     if (const auto rect = platf::focused_caret()) {
-      const auto body = "{\"x\":" + std::to_string((*rect)[0]) +
-                        ",\"y\":" + std::to_string((*rect)[1]) +
-                        ",\"w\":" + std::to_string((*rect)[2]) +
-                        ",\"h\":" + std::to_string((*rect)[3]) +
-                        ",\"source\":\"caret\"}";
-      response->write(SimpleWeb::StatusCode::success_ok, body, headers);
+      response->write(
+        SimpleWeb::StatusCode::success_ok,
+        std::format(R"({{"x":{},"y":{},"w":{},"h":{},"source":"caret"}})",
+                    (*rect)[0], (*rect)[1], (*rect)[2], (*rect)[3]),
+        headers
+      );
       return;
     }
 #endif
@@ -1315,10 +1315,12 @@ namespace nvhttp {
     // the picture for, and in trackpad mode it is the only thing the client cannot work out for
     // itself: it sends relative motion and never learns where the pointer ended up.
     if (const auto point = platf::pointer_location()) {
-      const auto body = "{\"x\":" + std::to_string((*point)[0]) +
-                        ",\"y\":" + std::to_string((*point)[1]) +
-                        ",\"w\":0,\"h\":0,\"source\":\"pointer\"}";
-      response->write(SimpleWeb::StatusCode::success_ok, body, headers);
+      response->write(
+        SimpleWeb::StatusCode::success_ok,
+        std::format(R"({{"x":{},"y":{},"w":0,"h":0,"source":"pointer"}})",
+                    (*point)[0], (*point)[1]),
+        headers
+      );
       return;
     }
 
