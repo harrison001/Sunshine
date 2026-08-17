@@ -13,6 +13,8 @@
 #endif
 
 // standard includes
+#include <array>
+#include <charconv>
 #include <fcntl.h>
 #include <ifaddrs.h>
 
@@ -183,6 +185,47 @@ namespace platf {
       (location.x - display.origin.x) / display.size.width,
       (location.y - display.origin.y) / display.size.height
     };
+  }
+
+  void place_pointer_on_display(const std::string &display_name) {
+    CGDirectDisplayID target {};
+    const auto *const begin {display_name.data()};
+    const auto *const end {display_name.data() + display_name.size()};
+    if (const auto [ptr, ec] {std::from_chars(begin, end, target)}; ec != std::errc {} || ptr != end) {
+      return;
+    }
+
+    const CGRect bounds {CGDisplayBounds(target)};
+    if (bounds.size.width <= 0 || bounds.size.height <= 0) {
+      return;
+    }
+
+    // Where it sits on whichever display it is on now. Not pointer_location(), which measures
+    // against the main display: the pointer is on the one being left behind, and that is usually
+    // not the main one — leaving it is the reason any of this is happening.
+    double fraction_x {0.5};
+    double fraction_y {0.5};
+    if (CGEventRef snapshot = CGEventCreate(nullptr)) {
+      const CGPoint location {CGEventGetLocation(snapshot)};
+      CFRelease(snapshot);
+
+      std::array<CGDirectDisplayID, 8> displays {};
+      uint32_t count {};
+      if (CGGetDisplaysWithPoint(location, displays.size(), displays.data(), &count) == kCGErrorSuccess && count > 0) {
+        if (const CGRect from {CGDisplayBounds(displays[0])}; from.size.width > 0 && from.size.height > 0) {
+          fraction_x = (location.x - from.origin.x) / from.size.width;
+          fraction_y = (location.y - from.origin.y) / from.size.height;
+        }
+      }
+    }
+
+    CGWarpMouseCursorPosition(CGPointMake(
+      bounds.origin.x + bounds.size.width * fraction_x,
+      bounds.origin.y + bounds.size.height * fraction_y
+    ));
+    // A warp on its own leaves the system briefly disregarding real movement, which feels like the
+    // pointer sticking for a moment straight after a switch.
+    CGAssociateMouseAndMouseCursorPosition(true);
   }
 
   bool is_screen_capture_allowed() {

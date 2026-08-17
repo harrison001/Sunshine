@@ -1737,6 +1737,10 @@ namespace video {
               // Process any pending display switch with the new list of displays
               if (switch_display_event->peek()) {
                 display_p = std::clamp(*switch_display_event->pop(), 0, static_cast<int>(display_names.size()) - 1);
+                // Bring the pointer across with it. Left on the display we have stopped sending it
+                // is invisible, and a client sending relative motion cannot fetch it back —
+                // relative motion moves it on from wherever it is, and nobody can see where that is.
+                platf::place_pointer_on_display(display_names[display_p]);
               }
 
               // reset_display() will sleep between retries
