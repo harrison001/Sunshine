@@ -1180,6 +1180,19 @@ namespace platf {
   void place_pointer_on_display(const std::string &display_name);
 
   /**
+   * @brief Tell the input backend which display pointer coordinates belong to.
+   *
+   * The backend holds relative motion inside a display so the pointer cannot wander off the one
+   * being sent. Which display that is only becomes known when capture picks one, and it changes
+   * when capture moves, so it has to be told rather than assumed — a backend left assuming will
+   * hold the pointer inside a display nobody is looking at.
+   *
+   * @param input The input_t instance to use.
+   * @param display_name Display capture has moved to, named as `display_names()` names them.
+   */
+  void set_pointer_display(input_t &input, const std::string &display_name);
+
+  /**
    * @brief Move mouse using the backend coordinate system.
    *
    * @param input Platform input backend that receives the event.
