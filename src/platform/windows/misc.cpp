@@ -1878,6 +1878,12 @@ namespace platf {
     return {};
   }
 
+  void place_pointer_on_display(const std::string &display_name) {
+    // Not implemented here yet. The pointer stays where it was after a display switch, which is
+    // the behaviour every platform had before macOS gained this.
+    (void) display_name;
+  }
+
   std::optional<std::array<double, 2>> pointer_location() {
     POINT cursor {};
     if (!GetCursorPos(&cursor)) {

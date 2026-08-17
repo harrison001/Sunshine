@@ -1164,6 +1164,22 @@ namespace platf {
   std::optional<std::array<double, 2>> pointer_location();
 
   /**
+   * @brief Move the pointer onto a display, keeping where it sat within the one it was on.
+   *
+   * Switching which display is captured leaves the pointer where it was, on a display that is no
+   * longer being sent. The picture changes and the cursor does not appear in it, and a client
+   * sending relative motion has no way to bring it across, because relative motion has no idea
+   * where it currently is.
+   *
+   * Placed at the same fraction of the new display as it occupied on the old one, so it turns up
+   * roughly where the hand that was moving it expects. The centre is used when it cannot be told
+   * which display it was on.
+   *
+   * @param display_name Display to move it to, named as `display_names()` names them.
+   */
+  void place_pointer_on_display(const std::string &display_name);
+
+  /**
    * @brief Move mouse using the backend coordinate system.
    *
    * @param input Platform input backend that receives the event.
