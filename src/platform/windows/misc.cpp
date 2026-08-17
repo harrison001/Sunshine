@@ -1887,14 +1887,14 @@ namespace platf {
     // GetCursorPos answers in virtual-screen coordinates, which span every monitor, so a pointer
     // on a second one lands outside the streamed display rather than nowhere. Only a pointer on
     // the display being streamed means anything to the client.
-    MONITORINFO info {};
-    info.cbSize = sizeof(info);
-    const auto monitor = MonitorFromPoint(POINT {0, 0}, MONITOR_DEFAULTTOPRIMARY);
-    if (!monitor || !GetMonitorInfo(monitor, &info)) {
+    MONITORINFO primary {};
+    primary.cbSize = sizeof(primary);
+    if (const auto monitor = MonitorFromPoint(POINT {0, 0}, MONITOR_DEFAULTTOPRIMARY);
+        !monitor || !GetMonitorInfo(monitor, &primary)) {
       return std::nullopt;
     }
 
-    const auto &bounds = info.rcMonitor;
+    const auto &bounds = primary.rcMonitor;
     const auto width = static_cast<double>(bounds.right - bounds.left);
     const auto height = static_cast<double>(bounds.bottom - bounds.top);
     if (width <= 0 || height <= 0) {
