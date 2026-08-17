@@ -261,6 +261,13 @@ namespace input {
     std::unique_ptr<platf::client_input_t> client_context;  ///< Client context.
 
     safe::mail_raw_t::event_t<input::touch_port_t> touch_port_event;  ///< Touch port event.
+    /// Display capture has moved to.
+    ///
+    /// Subscribed here rather than in rebind_input because this rides the global mailbox: which
+    /// display is being captured is one fact about the machine, so it neither needs nor wants
+    /// rebinding when a session changes — and rebind_input does not run when the first one starts,
+    /// which left this null for the whole of it.
+    safe::mail_raw_t::event_t<std::string> capture_display_event {mail::man->event<std::string>(mail::capture_display)};
     platf::feedback_queue_t feedback_queue;  ///< Queue used to deliver controller feedback to the platform backend.
 
     std::list<std::vector<uint8_t>> input_queue;  ///< Pending raw input packets waiting for processing.
@@ -680,11 +687,37 @@ namespace input {
    * @param input Platform input backend that receives the event.
    * @param packet Protocol packet being processed.
    */
+  /**
+   * @brief Point the input backend at whatever display capture has moved to.
+   *
+   * Relative motion is held inside a display so the pointer cannot leave the picture being sent.
+   * Which display that is changes when capture switches, and the backend has no other way to hear
+   * about it — left uninformed it keeps the pointer inside whichever display it assumed at
+   * startup, which after a switch is one nobody is looking at.
+   *
+   * Applied here rather than the moment capture moves because this is the side that holds the
+   * input backend. The cost is that it takes effect on the first movement afterwards, which is
+   * the first moment it could matter anyway.
+   *
+   * @param input The input context.
+   */
+  void follow_capture_display(std::shared_ptr<input_t> &input) {
+    auto &event = input->capture_display_event;
+    // Silent on both counts: this runs on every mouse packet, so anything logged unconditionally
+    // here would drown the log. What came of it is reported by the platform, once, on the rare
+    // occasions there is something to report.
+    if (!event || !event->peek()) {
+      return;
+    }
+    platf::set_pointer_display(platf_input, *event->pop());
+  }
+
   void passthrough(std::shared_ptr<input_t> &input, PNV_REL_MOUSE_MOVE_PACKET packet) {
     if (!config::input.mouse) {
       return;
     }
 
+    follow_capture_display(input);
     input->mouse_left_button_timeout = DISABLE_LEFT_BUTTON_DELAY;
     platf::move_mouse(platf_input, util::endian::big(packet->deltaX), util::endian::big(packet->deltaY));
   }
@@ -697,6 +730,8 @@ namespace input {
    * @return The host-relative coordinate pair if a touchport is available.
    */
   std::optional<std::pair<float, float>> client_to_touchport(std::shared_ptr<input_t> &input, const std::pair<float, float> &val, const std::pair<float, float> &size) {
+    follow_capture_display(input);
+
     auto &touch_port_event = input->touch_port_event;
     auto &touch_port = input->touch_port;
     if (touch_port_event->peek()) {

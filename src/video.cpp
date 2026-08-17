@@ -1548,6 +1548,11 @@ namespace video {
     if (!disp) {
       return;
     }
+
+    // Not only when the display changes: a session that starts on a display other than the
+    // primary one needs the pointer held inside that one from the first movement, and that is
+    // the commoner way to meet this than switching mid-stream.
+    mail::man->event<std::string>(mail::capture_display)->raise(display_names[display_p]);
     display_wp = disp;
 
     constexpr auto capture_buffer_size = 12;
@@ -1742,6 +1747,10 @@ namespace video {
                 // relative motion moves it on from wherever it is, and nobody can see where that is.
                 platf::place_pointer_on_display(display_names[display_p]);
               }
+
+              // Whichever display capture lands on, input has to hold the pointer inside that one,
+              // and this is the only place that knows which it is.
+              mail::man->event<std::string>(mail::capture_display)->raise(display_names[display_p]);
 
               // reset_display() will sleep between retries
               reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
@@ -2665,7 +2674,12 @@ namespace video {
       // Process any pending display switch with the new list of displays
       if (switch_display_event->peek()) {
         display_p = std::clamp(*switch_display_event->pop(), 0, static_cast<int>(display_names.size()) - 1);
+        platf::place_pointer_on_display(display_names[display_p]);
       }
+
+      // Whichever display capture lands on, input has to hold the pointer inside that one, and
+      // this is the only place that knows which it is.
+      mail::man->event<std::string>(mail::capture_display)->raise(display_names[display_p]);
 
       // reset_display() will sleep between retries
       reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], synced_session_ctxs.front()->config);

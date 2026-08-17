@@ -950,6 +950,25 @@ namespace platf {
     virtualhid::move_mouse(virtualhid::get_input_context(input), deltaX, deltaY);
   }
 
+  void set_pointer_display(input_t &input, const std::string &display_name) {
+    const auto &runtime = virtualhid::get_input_context(input).runtime;
+    if (!runtime) {
+      BOOST_LOG(debug) << "Not aiming the pointer at display ["sv << display_name
+                       << "]: no libvirtualhid runtime"sv;
+      return;
+    }
+    // Reported rather than propagated. This is housekeeping beside a display change that has
+    // already happened; a pointer confined to the wrong rectangle is a poor outcome, and refusing
+    // to carry on streaming because of it would be a worse one.
+    const auto status = runtime->set_pointer_display(display_name);
+    if (!status.ok()) {
+      BOOST_LOG(warning) << "Could not aim the pointer at display ["sv << display_name
+                         << "]: "sv << status.message();
+      return;
+    }
+    BOOST_LOG(debug) << "Pointer now confined to display ["sv << display_name << ']';
+  }
+
   void abs_mouse(input_t &input, const touch_port_t &touch_port, float x, float y) {
     virtualhid::abs_mouse(virtualhid::get_input_context(input), touch_port, x, y);
   }
