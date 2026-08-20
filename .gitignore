@@ -61,3 +61,6 @@ junit.xml
 *.pyc
 .venv/
 venv/
+
+# 本机签名身份,绝不入库
+.sign-identity
