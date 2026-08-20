@@ -715,12 +715,6 @@ namespace input {
   }
 
   /**
-   * @brief Forward a client input packet directly to the platform backend.
-   *
-   * @param input Platform input backend that receives the event.
-   * @param packet Protocol packet being processed.
-   */
-  /**
    * @brief Point the input backend at whatever display capture has moved to.
    *
    * Relative motion is held inside a display so the pointer cannot leave the picture being sent.
@@ -745,6 +739,12 @@ namespace input {
     platf::set_pointer_display(platf_input, *event->pop());
   }
 
+  /**
+   * @brief Forward a client input packet directly to the platform backend.
+   *
+   * @param input Platform input backend that receives the event.
+   * @param packet Protocol packet being processed.
+   */
   void passthrough(std::shared_ptr<input_t> &input, PNV_REL_MOUSE_MOVE_PACKET packet) {
     if (!config::input.mouse) {
       return;
