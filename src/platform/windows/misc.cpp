@@ -1895,8 +1895,7 @@ namespace platf {
     // the display being streamed means anything to the client.
     MONITORINFO primary {};
     primary.cbSize = sizeof(primary);
-    if (const auto monitor = MonitorFromPoint(POINT {0, 0}, MONITOR_DEFAULTTOPRIMARY);
-        !monitor || !GetMonitorInfo(monitor, &primary)) {
+    if (const auto monitor = MonitorFromPoint(POINT {0, 0}, MONITOR_DEFAULTTOPRIMARY); !monitor || !GetMonitorInfo(monitor, &primary)) {
       return std::nullopt;
     }
 

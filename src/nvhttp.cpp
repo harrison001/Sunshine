@@ -1303,8 +1303,7 @@ namespace nvhttp {
     if (const auto rect = platf::focused_caret()) {
       response->write(
         SimpleWeb::StatusCode::success_ok,
-        std::format(R"({{"x":{},"y":{},"w":{},"h":{},"source":"caret"}})",
-                    (*rect)[0], (*rect)[1], (*rect)[2], (*rect)[3]),
+        std::format(R"({{"x":{},"y":{},"w":{},"h":{},"source":"caret"}})", (*rect)[0], (*rect)[1], (*rect)[2], (*rect)[3]),
         headers
       );
       return;
@@ -1317,8 +1316,7 @@ namespace nvhttp {
     if (const auto point = platf::pointer_location()) {
       response->write(
         SimpleWeb::StatusCode::success_ok,
-        std::format(R"({{"x":{},"y":{},"w":0,"h":0,"source":"pointer"}})",
-                    (*point)[0], (*point)[1]),
+        std::format(R"({{"x":{},"y":{},"w":0,"h":0,"source":"pointer"}})", (*point)[0], (*point)[1]),
         headers
       );
       return;

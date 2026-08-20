@@ -19,10 +19,10 @@
 #include <ifaddrs.h>
 
 // platform includes
+#include <AppKit/AppKit.h>
+#include <ApplicationServices/ApplicationServices.h>
 #include <arpa/inet.h>
 #include <dlfcn.h>
-#include <ApplicationServices/ApplicationServices.h>
-#include <AppKit/AppKit.h>
 #include <Foundation/Foundation.h>
 #include <mach-o/dyld.h>
 #include <net/if_dl.h>
@@ -36,10 +36,10 @@
 
 // local includes
 #include "misc.h"
-#include "src/utility.h"
 #include "src/entry_handler.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/utility.h"
 
 using namespace std::literals;
 namespace fs = std::filesystem;
@@ -126,13 +126,7 @@ namespace platf {
     });
 
     CFTypeRef bounds = nullptr;
-    if (AXUIElementCopyParameterizedAttributeValue(
-          static_cast<AXUIElementRef>(focused),
-          kAXBoundsForRangeParameterizedAttribute,
-          range,
-          &bounds
-        ) != kAXErrorSuccess ||
-        !bounds) {
+    if (AXUIElementCopyParameterizedAttributeValue(static_cast<AXUIElementRef>(focused), kAXBoundsForRangeParameterizedAttribute, range, &bounds) != kAXErrorSuccess || !bounds) {
       return std::nullopt;
     }
     const auto release_bounds = util::fail_guard([bounds]() {
