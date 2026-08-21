@@ -48,7 +48,17 @@ fi
 
 echo "==> doxygen"
 if command -v doxygen >/dev/null; then
-  dox_out=$(cd docs && doxygen Doxyfile 2>&1 | grep -iE "warning|error" | grep -vE "third-party|node_modules")
+  # 只看我们改过的文件。上游自己的文件在本地会报一堆 @examples / @seealso
+  # "unknown command"——那是他们在 Doxyfile 里定义的别名,本地 doxygen 版本不认识
+  # 而已,不是问题也不该由我们修。第一版没限定范围,rebase 完 17 个上游提交之后
+  # 立刻被这些告警淹了,还误报成"静态检查没过"。
+  ours=$(git diff --name-only origin/master...HEAD | grep -E '\.(cpp|h|mm|m)$' | sed 's|.*/||' | sort -u)
+  dox_all=$(cd docs && doxygen Doxyfile 2>&1 | grep -iE "warning|error" | grep -vE "third-party|node_modules")
+  if [ -n "$ours" ]; then
+    dox_out=$(echo "$dox_all" | grep -F "$ours" || true)
+  else
+    dox_out=""
+  fi
   if [ -n "$dox_out" ]; then
     echo "$dox_out" | head -20
     fail=1
