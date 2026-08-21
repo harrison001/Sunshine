@@ -36,7 +36,7 @@ fi
 echo "==> shellcheck"
 if command -v shellcheck >/dev/null; then
   # 只查我们自己加的两个,上游那些脚本不归我们管
-  if sh_out=$(shellcheck check-before-push.sh install-local.sh 2>&1); then
+  if sh_out=$(shellcheck check-before-push.sh install-local.sh sync-upstream.sh 2>&1); then
     echo "    无问题"
   else
     echo "$sh_out" | head -20
