@@ -56,23 +56,35 @@ say "    子模块现在在 ${NEW_SUB:0:8}"
 say "==> 叠 Sunshine"
 git branch -f _sync_backup macos-work            # 出事能退回来
 if ! git rebase origin/master >/tmp/rebase.log 2>&1; then
-  # 子模块冲突是预料之中的,用刚 rebase 好的那个提交解掉,继续。
-  if grep -q "CONFLICT (submodule)" /tmp/rebase.log; then
-    say "    子模块冲突(意料之中),取我们刚叠好的那个"
+  # 子模块冲突会撞不止一次——我们有好几个提交碰过这个指针,每一个重放时都要
+  # 再解一遍。第一版只解了一次就放弃了,所以这里循环到 rebase 真的走完为止。
+  rounds=0
+  while [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; do
+    rounds=$((rounds + 1))
+    [ "$rounds" -gt 30 ] && { git rebase --abort 2>/dev/null; die "解了 30 轮还没完,不对劲。备份在 _sync_backup"; }
+
+    # 只认子模块这一种冲突,别的一律交给人。
+    others=$(git diff --name-only --diff-filter=U | grep -v "^$SUB$" || true)
+    if [ -n "$others" ]; then
+      git rebase --abort 2>/dev/null
+      say "    这些文件冲突,要人工解:"
+      echo "$others" | while IFS= read -r f; do echo "      $f"; done
+      die "备份在 _sync_backup"
+    fi
+
+    say "    第 $rounds 次子模块冲突(意料之中),取我们刚叠好的那个"
     git -C "$SUB" checkout "$NEW_SUB" --quiet
     git add "$SUB"
     if ! GIT_EDITOR=true git rebase --continue >>/tmp/rebase.log 2>&1; then
-      git rebase --abort 2>/dev/null
-      grep -iE "CONFLICT" /tmp/rebase.log | head -8
-      die "还有别的冲突要人工解。备份在 _sync_backup"
+      # --continue 失败有两种:还有下一个冲突(循环继续),或者真的坏了(下一轮判定)
+      if [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ]; then
+        grep -iE "CONFLICT|error" /tmp/rebase.log | tail -5
+        die "rebase 中断了。备份在 _sync_backup"
+      fi
     fi
-  else
-    git rebase --abort 2>/dev/null
-    grep -iE "CONFLICT" /tmp/rebase.log | head -8
-    die "有冲突要人工解。备份在 _sync_backup"
-  fi
+  done
 fi
-say "    rebase 完成"
+say "    rebase 完成,共解了 ${rounds:-0} 次子模块冲突"
 
 # ---------------------------------------------------------------- 验证
 say "==> 静态检查"
