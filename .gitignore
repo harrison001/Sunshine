@@ -60,3 +60,7 @@ venv/
 
 # 本机签名身份,绝不入库
 .sign-identity
+
+# doxygen 本地输出
+docs/html/
+docs/latex/
