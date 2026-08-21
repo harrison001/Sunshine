@@ -91,6 +91,9 @@ say "==> 静态检查"
 ./check-before-push.sh || die "静态检查没过。备份在 _sync_backup"
 
 say "==> 编译"
+# 先重跑配置:版本串是 CMake 配置阶段烘进二进制的,增量构建不碰它。rebase 换了
+# HEAD 之后不重配的话,跑起来的程序会自报旧提交号,排查时把人带偏。
+cmake -S . -B build >/dev/null 2>&1 || die "cmake 配置失败"
 if ! ninja -C build >/tmp/build.log 2>&1; then
   grep -iE "error|FAILED" /tmp/build.log | head -10
   die "编译失败。备份在 _sync_backup"
