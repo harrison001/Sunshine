@@ -34,6 +34,24 @@ namespace platf {
    * @return {x, y, width, height} in 0..1 of the streamed display, or nothing.
    */
   std::optional<std::array<double, 4>> focused_caret();
+
+  /**
+   * @brief Type text on macOS with CoreGraphics, bypassing libvirtualhid.
+   *
+   * Sunshine routes text input through libvirtualhid since #5368, and that runtime does not exist
+   * on macOS — the log says so on every start: "gamepads.virtualhid-not-available". With no
+   * keyboard device to hand the text to, virtualhid::unicode silently does nothing, and remote
+   * typing of anything outside the keycode path (Chinese, emoji, accented characters) stops
+   * arriving. Nothing reports an error; the characters simply never appear.
+   *
+   * CoreGraphics can post the text directly and needs no virtual device, so this is what macOS
+   * falls back to.
+   *
+   * @param utf8 Text to type, UTF-8, not necessarily NUL-terminated.
+   * @param size Length of the text in bytes.
+   * @return True if the text was posted.
+   */
+  bool unicode_native(const char *utf8, int size);
 }  // namespace platf
 
 namespace dyn {
