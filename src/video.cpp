@@ -52,7 +52,7 @@ namespace video {
      * @return True if there should be no issues with the probing, false if we should prevent it.
      */
     bool allow_encoder_probing() {
-      const auto devices {display_device::enumerate_devices()};
+      auto devices {display_device::enumerate_devices()};
 
       // If there are no devices, then either the API is not working correctly or OS does not support the lib.
       // Either way we should not block the probing in this case as we can't tell what's wrong.
@@ -63,13 +63,37 @@ namespace video {
       // Since Windows 11 24H2, it is possible that there will be no active devices present
       // for some reason (probably a bug). Trying to probe encoders in such a state locks/breaks the DXGI
       // and also the display device for Windows. So we must have at least 1 active device.
-      const bool at_least_one_device_is_active = std::any_of(std::begin(devices), std::end(devices), [](const auto &device) {
-        // If device has additional info, it is active.
-        return static_cast<bool>(device.m_info);
-      });
+      const auto any_device_is_active = [](const auto &list) {
+        return std::any_of(std::begin(list), std::end(list), [](const auto &device) {
+          // If device has additional info, it is active.
+          return static_cast<bool>(device.m_info);
+        });
+      };
 
-      if (at_least_one_device_is_active) {
+      if (any_device_is_active(devices)) {
         return true;
+      }
+
+      // A sleeping display is reported as inactive, and on macOS that is an ordinary state to
+      // find the host in: the machine stays awake — audio keeps playing, downloads keep running —
+      // while the screen has simply switched itself off. Refusing here fails the session with
+      // "Is a display connected and turned on?", and the wake that would have fixed it lives
+      // further down in platf::display(), which this return never reaches. The cure was behind
+      // the door this guard locks.
+      //
+      // So ask for the display before giving up. Waking one is what a user does by hand when they
+      // reach for a VNC session to light the screen up and then reconnect — this does the same
+      // thing, without the second tool.
+      //
+      // The Windows 24H2 protection above is untouched: wake_display has no implementation off
+      // macOS, returns false immediately, and leaves the refusal exactly as it was.
+      BOOST_LOG(info) << "No active display devices; asking the platform to wake one before probing."sv;
+      if (display_device::wake_display({}, 3s)) {
+        devices = display_device::enumerate_devices();
+        if (any_device_is_active(devices)) {
+          BOOST_LOG(info) << "Display woke; proceeding with encoder probing."sv;
+          return true;
+        }
       }
 
       BOOST_LOG(error) << "No display devices are active at the moment! Cannot probe the encoders.";
