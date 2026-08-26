@@ -22,6 +22,9 @@
 #include "src/config.h"
 #include "src/logging.h"
 #include "virtualhid_input.h"
+#ifdef __APPLE__
+  #include "src/platform/macos/misc.h"
+#endif
 
 using namespace std::literals;
 
@@ -1052,6 +1055,14 @@ namespace platf {
   }
 
   void unicode(input_t &input, const char *utf8, int size) {
+#ifdef __APPLE__
+    // libvirtualhid has no macOS runtime — every start logs "gamepads.virtualhid-not-available" —
+    // so there is no keyboard device for the text to reach, and the call below would drop it
+    // without a word. Post it with CoreGraphics instead. See platf::unicode_native.
+    if (unicode_native(utf8, size)) {
+      return;
+    }
+#endif
     virtualhid::unicode(virtualhid::get_input_context(input), utf8, size);
   }
 
