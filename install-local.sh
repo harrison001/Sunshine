@@ -52,6 +52,26 @@ if [ -z "$IDENTITY" ]; then
   exit 1
 fi
 
+# **Configure every time, with a real version.**
+#
+# 两件事都在这一步:
+#
+# 1. 版本号是 configure 时烤进二进制的(build_version.cmake 跑 git rev-parse),而 CMake
+#    只在构建文件变化时才自动重跑 configure——改源码不会。不显式 configure 的话,哈希
+#    会冻结在上一次碰巧 reconfigure 时的 HEAD,越用越旧。
+#
+# 2. 没有 BRANCH + BUILD_VERSION 这两个环境变量时,build_version.cmake 走的是非 CI 分支,
+#    版本号是 CMakeLists 里那个占位符 `0.0.0` 加一个短哈希。`0.0.0-<hash>` 看不出任何
+#    东西——既不知道基于哪个上游版本,也不知道领先多少。
+#
+# git describe 两样都给了:v2026.817.185037-35-g055cfc9a = 上游基线 + 领先 35 个提交 +
+# 当前提交。CI 分支会把开头的 v 去掉。
+BUILD_VERSION="$(git describe --tags --always | sed 's/^v//')"
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+export BUILD_VERSION BRANCH
+echo "==> configure (version $BUILD_VERSION)"
+cmake -S . -B build > /dev/null
+
 echo "==> 编译"
 ninja -C build
 
