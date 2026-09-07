@@ -154,9 +154,14 @@ namespace platf {
       // into a session and did not come back until the lid was closed and reopened; the client
       // disconnected, join() never returned, and Sunshine aborted itself.
       //
-      // So give up on a display that will not come back. Returning reinit takes the same road
-      // as the woke-again case: the caller re-enumerates displays and retries with backoff, and
-      // that retry loop is bounded by the session still running, so shutdown ends it.
+      // So give up on a display that will not come back, and end the session rather than rebuild.
+      //
+      // **error, not reinit, and the difference matters.** Rebuilding wakes the display again,
+      // and if what put it to sleep is still in force the two fight: measured 2026-09-07 with
+      // the pointer parked in the bottom-right hot corner, the display cycled off and on every
+      // ten to thirteen seconds for as long as it stayed there. The corner is a deliberate
+      // "switch the display off"; taking it back is the wrong answer to it. Ending the session
+      // leaves the display asleep, which is what was asked for.
       //
       // This stops the crash. It does not light the display back up — nothing here can. When
       // the panel itself is stuck (input reached the system, the external display woke, the
@@ -171,9 +176,9 @@ namespace platf {
           } else if (std::chrono::steady_clock::now() - *asleep_since > display_sleep_patience) {
             BOOST_LOG(warning) << "Display ["sv << display_id << "] has been asleep for "sv
                                << std::chrono::duration_cast<std::chrono::seconds>(display_sleep_patience).count()
-                               << "s; giving up on this capture so the session can end."sv;
+                               << "s; ending the session and leaving it asleep."sv;
             [av_capture stopCapture:signal];
-            return capture_e::reinit;
+            return capture_e::error;
           }
         } else if (display_slept) {
           BOOST_LOG(info) << "Display ["sv << display_id << "] woke from sleep, reinitializing capture"sv;
