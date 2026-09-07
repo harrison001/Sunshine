@@ -69,6 +69,15 @@ namespace platf {
     constexpr auto dummy_img_timeout {5s};
 
     /**
+     * @brief How long capture will sit on a sleeping display before giving up on it.
+     *
+     * Comfortably inside the ten seconds stream::session::join() allows before its hang
+     * detector traps the process, so a display that sleeps and does not come back ends the
+     * session instead of taking the whole of Sunshine with it.
+     */
+    constexpr auto display_sleep_patience {3s};
+
+    /**
      * @brief Convert a duration to an absolute dispatch timeout.
      *
      * @param duration How far in the future the timeout should fire.
@@ -135,10 +144,37 @@ namespace platf {
       // AVCaptureSession delivering sample buffers, and the session does not resume when the
       // display wakes again. Poll instead, so a display that slept and woke can be reported
       // to the caller as a display that needs rebuilding.
+      // **Every way out of this loop has to be bounded.**
+      //
+      // Waiting for the display to wake again was the only exit besides the semaphore, and the
+      // semaphore is signalled from inside this function — nothing outside can end the wait. A
+      // display that sleeps and stays asleep therefore parked this thread indefinitely, and
+      // because session teardown joins it, the ten-second hang detector in stream::session
+      // trapped the whole process. Seen 2026-09-07: the display was switched off two seconds
+      // into a session and did not come back until the lid was closed and reopened; the client
+      // disconnected, join() never returned, and Sunshine aborted itself.
+      //
+      // So give up on a display that will not come back. Returning reinit takes the same road
+      // as the woke-again case: the caller re-enumerates displays and retries with backoff, and
+      // that retry loop is bounded by the session still running, so shutdown ends it.
+      //
+      // This stops the crash. It does not light the display back up — nothing here can. When
+      // the panel itself is stuck (input reached the system, the external display woke, the
+      // built-in did not) no software wake call reaches it; that needs display re-enumeration.
       bool display_slept {false};
+      std::optional<std::chrono::steady_clock::time_point> asleep_since;
       while (dispatch_semaphore_wait(signal, dispatch_timeout_from_now(capture_poll_interval)) != 0) {
         if (CGDisplayIsAsleep(display_id)) {
           display_slept = true;
+          if (!asleep_since) {
+            asleep_since = std::chrono::steady_clock::now();
+          } else if (std::chrono::steady_clock::now() - *asleep_since > display_sleep_patience) {
+            BOOST_LOG(warning) << "Display ["sv << display_id << "] has been asleep for "sv
+                               << std::chrono::duration_cast<std::chrono::seconds>(display_sleep_patience).count()
+                               << "s; giving up on this capture so the session can end."sv;
+            [av_capture stopCapture:signal];
+            return capture_e::reinit;
+          }
         } else if (display_slept) {
           BOOST_LOG(info) << "Display ["sv << display_id << "] woke from sleep, reinitializing capture"sv;
 
@@ -147,6 +183,8 @@ namespace platf {
           [av_capture stopCapture:signal];
 
           return capture_e::reinit;
+        } else {
+          asleep_since.reset();
         }
       }
 
