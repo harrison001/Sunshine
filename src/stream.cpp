@@ -2220,18 +2220,37 @@ namespace stream {
         logging::log_flush();
         lifetime::debug_trap();
       };
-      auto force_kill = task_pool.pushDelayed(task, 10s).task_id;
-      auto fg = util::fail_guard([&force_kill]() {
-        // Cancel the kill task if we manage to return from this function
-        task_pool.cancel(force_kill);
-      });
 
-      BOOST_LOG(debug) << "Waiting for video to end..."sv;
-      session.videoThread.join();
-      BOOST_LOG(debug) << "Waiting for audio to end..."sv;
-      session.audioThread.join();
-      BOOST_LOG(debug) << "Waiting for control to end..."sv;
-      session.controlEnd.view();
+      // **The watchdog covers the worker-thread waits and nothing else.**
+      //
+      // It exists for the NVENC deadlock described above: a stuck encoder thread that never
+      // returns from join(). The teardown that follows is ordinary bookkeeping, and one part of
+      // it is not: update_tray_pausing() does a synchronous round-trip to the Qt main thread
+      // (tray_update() uses Qt::BlockingQueuedConnection so the C API can stay synchronous).
+      // Charging that round-trip to a timeout calibrated for a GPU driver bug means a slow tray
+      // repaint terminates the process.
+      //
+      // That is not hypothetical. 2026-09-10 07:55:08 this killed Sunshine: the rtsp handler sat
+      // in session::join -> update_tray_pausing -> tray_update -> QLatch::waitInternal while the
+      // main thread was still rendering an earlier tray update's SVG icon, inside QFile::open.
+      // The blocking invoke queued behind it, never ran in time, and the watchdog fired.
+      //
+      // So arm it, wait for the workers, disarm it, and only then tear the rest down.
+      {
+        auto force_kill = task_pool.pushDelayed(task, 10s).task_id;
+        auto fg = util::fail_guard([&force_kill]() {
+          // Cancel the kill task if we manage to leave this scope
+          task_pool.cancel(force_kill);
+        });
+
+        BOOST_LOG(debug) << "Waiting for video to end..."sv;
+        session.videoThread.join();
+        BOOST_LOG(debug) << "Waiting for audio to end..."sv;
+        session.audioThread.join();
+        BOOST_LOG(debug) << "Waiting for control to end..."sv;
+        session.controlEnd.view();
+      }
+
       // Reset input on session stop to avoid stuck repeated keys
       BOOST_LOG(debug) << "Resetting Input..."sv;
       input::reset(session.input);
