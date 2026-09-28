@@ -89,9 +89,9 @@
   self.captureCallbacks = [[NSMapTable alloc] init];
   self.captureSignals = [[NSMapTable alloc] init];
 
-  // InputPriority: keep the device's own active format rather than letting the session pick a
-  // preset, so frameWidth/frameHeight above match what actually arrives.
-  self.session.sessionPreset = AVCaptureSessionPresetInputPriority;
+  // No sessionPreset override: AVCaptureSessionPresetInputPriority is iOS-only (unavailable on
+  // macOS). The session keeps its default and the VideoDataOutput scales frames to frameWidth/
+  // frameHeight (the device's active format) with ResizeAspect, so the exact preset is moot.
 
   if ([self.session canAddInput:deviceInput]) {
     [self.session addInput:deviceInput];
