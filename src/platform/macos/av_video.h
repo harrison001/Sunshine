@@ -74,6 +74,30 @@ typedef bool (^FrameCallbackBlock)(CMSampleBufferRef);
 - (id)initWithDisplay:(CGDirectDisplayID)displayID frameRate:(int)frameRate;
 
 /**
+ * @brief Find a video capture device (a capture card / camera) by name.
+ *
+ * Matches, case-insensitively, a device whose localized name or unique id contains the needle.
+ * This selects a capture card feeding another device's screen (e.g. a phone over HDMI) as the
+ * capture source instead of a display.
+ *
+ * @param needle Substring to match against device localized name or unique id.
+ * @return The matching AVCaptureDevice, or nil if none matches.
+ */
++ (AVCaptureDevice *)captureDeviceMatching:(NSString *)needle;
+
+/**
+ * @brief Initialize AVFoundation capture from a video capture device rather than a display.
+ *
+ * Frame size is taken from the device's active format. The capture, callback and teardown path is
+ * shared with the display case; only the session input differs.
+ *
+ * @param device The capture device to stream from.
+ * @param frameRate Frame rate.
+ * @return Initialized AVVideo instance, or nil on failure.
+ */
+- (id)initWithCaptureDevice:(AVCaptureDevice *)device frameRate:(int)frameRate;
+
+/**
  * @brief Set frame width frame height.
  *
  * @param frameWidth Frame width.

@@ -94,6 +94,7 @@ namespace platf {
   struct av_display_t: public display_t {
     AVVideo *av_capture {};  ///< AV capture.
     CGDirectDisplayID display_id {};  ///< Display ID.
+    bool is_camera {false};  ///< True when capturing a video device (capture card) rather than a display.
     std::unique_ptr<display_device::DisplayPowerGuardInterface> display_power_guard;  ///< Display power guard.
 
     ~av_display_t() override {
@@ -169,6 +170,11 @@ namespace platf {
       bool display_slept {false};
       std::optional<std::chrono::steady_clock::time_point> asleep_since;
       while (dispatch_semaphore_wait(signal, dispatch_timeout_from_now(capture_poll_interval)) != 0) {
+        // A capture card is not a display; display_id is meaningless for it, so the sleep dance
+        // (which reads CGDisplayIsAsleep) does not apply — just keep waiting for frames.
+        if (is_camera) {
+          continue;
+        }
         if (CGDisplayIsAsleep(display_id)) {
           display_slept = true;
           if (!asleep_since) {
@@ -316,43 +322,58 @@ namespace platf {
 
     auto display = std::make_shared<av_display_t>();
 
-    BOOST_LOG(debug) << "Waking display for capture selector ["sv << display_name << ']';
-    if (!display_device::wake_display(display_name, 1s)) {
-      BOOST_LOG(debug) << "Display wake attempt did not expose the requested display ["sv << display_name << ']';
-    }
-
-    display->display_power_guard = display_device::keep_display_awake("Sunshine display capture");
-    if (display->display_power_guard) {
-      BOOST_LOG(debug) << "Keeping display awake for capture"sv;
+    // "av:<name>" selects a video capture device (a capture card feeding another machine's screen,
+    // e.g. a phone over HDMI) instead of a display. Everything after this branch — the capture loop,
+    // frame callback and reported geometry — is shared with the display case.
+    if (display_name.rfind("av:", 0) == 0) {
+      const std::string needle {display_name.substr(3)};
+      AVCaptureDevice *device = [AVVideo captureDeviceMatching:[NSString stringWithUTF8String:needle.c_str()]];
+      if (!device) {
+        BOOST_LOG(error) << "No video capture device matches ["sv << needle << "]"sv;
+        return nullptr;
+      }
+      display->is_camera = true;
+      BOOST_LOG(info) << "Configuring capture device ["sv << [device.localizedName UTF8String] << "] to stream"sv;
+      display->av_capture = [[AVVideo alloc] initWithCaptureDevice:device frameRate:config.framerate];
     } else {
-      BOOST_LOG(debug) << "Unable to create display sleep prevention assertion"sv;
-    }
-
-    // Default to main display
-    display->display_id = CGMainDisplayID();
-
-    if (const auto configured_display_id {parse_display_id(display_name)}) {
-      display->display_id = *configured_display_id;
-    } else if (!display_name.empty()) {
-      BOOST_LOG(warning) << "Configured display ["sv << display_name
-                         << "] is not a valid macOS capture display id. Falling back to main display ["sv
-                         << display->display_id << "]."sv;
-    }
-
-    // Print all displays available with their names and ids
-    BOOST_LOG(debug) << "Detecting displays"sv;
-    for (const auto &device : display_device::enumerate_devices()) {
-      if (device.m_display_name.empty()) {
-        continue;
+      BOOST_LOG(debug) << "Waking display for capture selector ["sv << display_name << ']';
+      if (!display_device::wake_display(display_name, 1s)) {
+        BOOST_LOG(debug) << "Display wake attempt did not expose the requested display ["sv << display_name << ']';
       }
 
-      BOOST_LOG(debug) << "Detected display: "sv << device.m_friendly_name
-                       << " (id: "sv << device.m_display_name << ") connected: true"sv;
+      display->display_power_guard = display_device::keep_display_awake("Sunshine display capture");
+      if (display->display_power_guard) {
+        BOOST_LOG(debug) << "Keeping display awake for capture"sv;
+      } else {
+        BOOST_LOG(debug) << "Unable to create display sleep prevention assertion"sv;
+      }
+
+      // Default to main display
+      display->display_id = CGMainDisplayID();
+
+      if (const auto configured_display_id {parse_display_id(display_name)}) {
+        display->display_id = *configured_display_id;
+      } else if (!display_name.empty()) {
+        BOOST_LOG(warning) << "Configured display ["sv << display_name
+                           << "] is not a valid macOS capture display id. Falling back to main display ["sv
+                           << display->display_id << "]."sv;
+      }
+
+      // Print all displays available with their names and ids
+      BOOST_LOG(debug) << "Detecting displays"sv;
+      for (const auto &device : display_device::enumerate_devices()) {
+        if (device.m_display_name.empty()) {
+          continue;
+        }
+
+        BOOST_LOG(debug) << "Detected display: "sv << device.m_friendly_name
+                         << " (id: "sv << device.m_display_name << ") connected: true"sv;
+      }
+
+      BOOST_LOG(info) << "Configuring selected display ("sv << display->display_id << ") to stream"sv;
+
+      display->av_capture = [[AVVideo alloc] initWithDisplay:display->display_id frameRate:config.framerate];
     }
-
-    BOOST_LOG(info) << "Configuring selected display ("sv << display->display_id << ") to stream"sv;
-
-    display->av_capture = [[AVVideo alloc] initWithDisplay:display->display_id frameRate:config.framerate];
 
     if (!display->av_capture) {
       BOOST_LOG(error) << "Video setup failed."sv;

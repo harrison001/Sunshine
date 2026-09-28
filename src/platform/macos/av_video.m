@@ -43,6 +43,67 @@
   return self;
 }
 
++ (AVCaptureDevice *)captureDeviceMatching:(NSString *)needle {
+  if (needle.length == 0) {
+    return nil;
+  }
+  // devicesWithMediaType: is deprecated but is the simplest call that still returns external
+  // capture cards across the SDK versions we build against. A substring match on the localized
+  // name keeps the config readable ("Cam Link 4K") instead of demanding a unique id.
+  NSArray<AVCaptureDevice *> *devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
+  for (AVCaptureDevice *device in devices) {
+    if ([device.localizedName rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [device.uniqueID rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound) {
+      return device;
+    }
+  }
+  return nil;
+}
+
+- (id)initWithCaptureDevice:(AVCaptureDevice *)device frameRate:(int)frameRate {
+  self = [super init];
+
+  if (!device) {
+    [self release];
+    return nil;
+  }
+
+  NSError *error = nil;
+  AVCaptureDeviceInput *deviceInput = [AVCaptureDeviceInput deviceInputWithDevice:device error:&error];
+  if (!deviceInput) {
+    [self release];
+    return nil;
+  }
+
+  // Frame size comes from the device's active format, the resolution the card is actually
+  // delivering (e.g. the HDMI mode of the phone plugged into it).
+  CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription);
+
+  self.displayID = 0;  // not a display
+  self.pixelFormat = kCVPixelFormatType_32BGRA;
+  self.frameWidth = (int) dims.width;
+  self.frameHeight = (int) dims.height;
+  self.minFrameDuration = CMTimeMake(1, frameRate);
+  self.session = [[AVCaptureSession alloc] init];
+  self.videoOutputs = [[NSMapTable alloc] init];
+  self.captureCallbacks = [[NSMapTable alloc] init];
+  self.captureSignals = [[NSMapTable alloc] init];
+
+  // InputPriority: keep the device's own active format rather than letting the session pick a
+  // preset, so frameWidth/frameHeight above match what actually arrives.
+  self.session.sessionPreset = AVCaptureSessionPresetInputPriority;
+
+  if ([self.session canAddInput:deviceInput]) {
+    [self.session addInput:deviceInput];
+  } else {
+    return nil;
+  }
+
+  [self.session startRunning];
+
+  return self;
+}
+
 - (void)dealloc {
   [self.videoOutputs release];
   [self.captureCallbacks release];
