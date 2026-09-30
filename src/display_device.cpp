@@ -833,6 +833,13 @@ namespace display_device {
     })};
 
 #ifdef __APPLE__
+    // A capture-device source ("av:<name>") is not a display the settings manager knows about, so
+    // getDisplayName() returns empty for it. Pass it through unchanged — same spirit as the integer
+    // display-id fallback below — so it survives to platf::display(), where our fork routes an
+    // "av:" output_name to an AVCaptureDevice (capture card) input instead of a CoreGraphics display.
+    if (output_name.rfind("av:", 0) == 0) {
+      return output_name;
+    }
     if (mapped_name.empty() && is_unsigned_integer(output_name)) {
       return output_name;
     }

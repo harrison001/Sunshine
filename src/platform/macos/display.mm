@@ -414,8 +414,17 @@ namespace platf {
       return display_names;
     }
 
+    // A capture-device source is selected with output_name = "av:<name>" (see display()). It is not
+    // a CoreGraphics display, so it never appears in enumerate_devices(). Surface it as an available
+    // "display" here so refresh_displays() in video.cpp can match config::video.output_name against
+    // it and hand it to display(); otherwise the match fails and Sunshine silently falls back to the
+    // main display. Put it first so it is the default selection when configured.
+    if (config::video.output_name.rfind("av:", 0) == 0) {
+      display_names.emplace_back(config::video.output_name);
+    }
+
     const auto devices {display_device::enumerate_devices()};
-    display_names.reserve(devices.size());
+    display_names.reserve(display_names.size() + devices.size());
     for (const auto &device : devices) {
       if (!device.m_display_name.empty()) {
         display_names.emplace_back(device.m_display_name);
