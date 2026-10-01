@@ -86,6 +86,17 @@ typedef bool (^FrameCallbackBlock)(CMSampleBufferRef);
 + (AVCaptureDevice *)captureDeviceMatching:(NSString *)needle;
 
 /**
+ * @brief Enumerate external video-capture devices (capture cards).
+ *
+ * Returns external capture devices (e.g. a capture card carrying a phone's HDMI output), excluding
+ * the built-in and Continuity cameras, so they can be offered as switchable capture sources in
+ * display_names(). Enumeration does not open the devices and needs no camera permission.
+ *
+ * @return Array of external AVCaptureDevices (possibly empty).
+ */
++ (NSArray<AVCaptureDevice *> *)captureDevices;
+
+/**
  * @brief Initialize AVFoundation capture from a video capture device rather than a display.
  *
  * Frame size is taken from the device's active format. The capture, callback and teardown path is

@@ -60,6 +60,22 @@
   return nil;
 }
 
++ (NSArray<AVCaptureDevice *> *)captureDevices {
+  NSMutableArray<AVCaptureDevice *> *result = [NSMutableArray array];
+  // devicesWithMediaType: is deprecated but is the simplest call that still returns external capture
+  // cards across the SDK versions we build against (deprecation is a warning, not an error).
+  for (AVCaptureDevice *device in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo]) {
+    // A capture card reports as an external device and is not a Continuity camera. This keeps the
+    // built-in FaceTime camera and nearby iPhones/iPads (Continuity) out of the capture-source list.
+    if (@available(macOS 14.0, *)) {
+      if ([device.deviceType isEqualToString:AVCaptureDeviceTypeExternal] && !device.isContinuityCamera) {
+        [result addObject:device];
+      }
+    }
+  }
+  return result;
+}
+
 - (id)initWithCaptureDevice:(AVCaptureDevice *)device frameRate:(int)frameRate {
   self = [super init];
 
