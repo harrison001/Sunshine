@@ -31,6 +31,21 @@
   AVCaptureScreenInput *screenInput = [[AVCaptureScreenInput alloc] initWithDisplayID:self.displayID];
   [screenInput setMinFrameDuration:self.minFrameDuration];
 
+  // Crop the top menu-bar strip out of the capture for the phone-mirroring virtual screen — a
+  // non-builtin display in portrait orientation. Real external monitors (e.g. an ultrawide) and the
+  // built-in display are landscape, so their desktop streams keep their menu bars. Identifying the
+  // virtual screen by shape rather than display id survives the virtual display's id churn. The
+  // virtual screen is a 1x (LoDPI) display, so one menu-bar point is one pixel, and
+  // AVCaptureScreenInput.cropRect has a bottom-left origin — (0,0,W,H-menuBar) keeps the content
+  // below the menu bar and drops the strip.
+  if (!CGDisplayIsBuiltin(self.displayID) && self.frameHeight > self.frameWidth) {
+    const int menuBarHeight = 24;  // standard non-notch macOS menu bar at 1x
+    if (self.frameHeight > menuBarHeight) {
+      screenInput.cropRect = CGRectMake(0, 0, self.frameWidth, self.frameHeight - menuBarHeight);
+      self.frameHeight = self.frameHeight - menuBarHeight;  // match the encoded size to the crop
+    }
+  }
+
   if ([self.session canAddInput:screenInput]) {
     [self.session addInput:screenInput];
   } else {
