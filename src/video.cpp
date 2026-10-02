@@ -1497,6 +1497,27 @@ namespace video {
   bool last_encoder_probe_supported_ref_frames_invalidation = false;  ///< Whether the last probe found reference-frame invalidation support.
   std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec = {};  ///< YUV444 support discovered for each probed codec.
 
+  namespace {
+    std::atomic<int> host_display_width {0};  ///< Width of the display most recently opened for capture.
+    std::atomic<int> host_display_height {0};  ///< Height of the display most recently opened for capture.
+
+    /**
+     * @brief Record the size of a display just opened for capture, for serverinfo to report.
+     *
+     * @param disp Display that was opened.
+     */
+    void remember_display_size(const std::shared_ptr<platf::display_t> &disp) {
+      if (disp && disp->width > 0 && disp->height > 0) {
+        host_display_width = disp->width;
+        host_display_height = disp->height;
+      }
+    }
+  }  // namespace
+
+  std::pair<int, int> host_display_size() {
+    return {host_display_width.load(), host_display_height.load()};
+  }
+
   /**
    * @brief Recreate a display capture object after a capture failure.
    *
@@ -1511,6 +1532,7 @@ namespace video {
       disp.reset();
       disp = platf::display(type, display_name, config);
       if (disp) {
+        remember_display_size(disp);
         break;
       }
 
@@ -1619,6 +1641,7 @@ namespace video {
     if (!disp) {
       return;
     }
+    remember_display_size(disp);
 
     // Not only when the display changes: a session that starts on a display other than the
     // primary one needs the pointer held inside that one from the first movement, and that is

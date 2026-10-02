@@ -1267,6 +1267,13 @@ namespace nvhttp {
     const uint32_t codec_mode_flags = get_codec_mode_flags();
     tree.put("root.ServerCodecModeSupport", codec_mode_flags);
 
+    // Size of the display being captured, so a client can match the stream's shape to it
+    // (a portrait host streamed upright rather than pillarboxed). Omitted until known.
+    if (const auto [display_width, display_height] = video::host_display_size(); display_width > 0 && display_height > 0) {
+      tree.put("root.HostDisplayWidth", display_width);
+      tree.put("root.HostDisplayHeight", display_height);
+    }
+
     if (!config::nvhttp.external_ip.empty()) {
       tree.put("root.ExternalIP", config::nvhttp.external_ip);
     }

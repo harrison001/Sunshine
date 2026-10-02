@@ -684,6 +684,16 @@ namespace video {
   extern std::array<bool, 3> last_encoder_probe_supported_yuv444_for_codec;  // 0 - H.264, 1 - HEVC, 2 - AV1
 
   /**
+   * @brief Pixel size of the display most recently opened for capture.
+   *
+   * Reported to clients in serverinfo so a client can pick a stream shape that matches the
+   * host, e.g. stream a portrait host upright instead of pillarboxing it into a landscape frame.
+   *
+   * @return Width and height in pixels, or {0, 0} before any display has been opened.
+   */
+  std::pair<int, int> host_display_size();
+
+  /**
    * @brief Resolve a client-requested dynamic range against probed encoder capabilities.
    *
    * @param encoder Selected encoder and its probed codec capabilities.
