@@ -4,8 +4,10 @@
  */
 
 // standard includes
+#include <atomic>
 #include <charconv>
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <string_view>
 
@@ -78,6 +80,17 @@ namespace platf {
     constexpr auto display_sleep_patience {3s};
 
     /**
+     * @brief How long capture will wait on a capture card that has stopped delivering frames.
+     *
+     * A capture card with no HDMI signal delivers nothing, and the end of a capture is only
+     * noticed inside the frame callback — so without a limit, the capture thread waits forever
+     * and the hang detector traps the process when the session ends. Inside the same ten-second
+     * budget as display_sleep_patience; a card with a signal delivers frames continuously, even
+     * of a still picture, so five quiet seconds means the signal is gone.
+     */
+    constexpr auto capture_device_frame_patience {5s};
+
+    /**
      * @brief Convert a duration to an absolute dispatch timeout.
      *
      * @param duration How far in the future the timeout should fire.
@@ -102,7 +115,12 @@ namespace platf {
     }
 
     capture_e capture(const push_captured_image_cb_t &push_captured_image_cb, const pull_free_image_cb_t &pull_free_image_cb, bool *cursor) override {
+      // When the last frame arrived, so a capture card that went quiet can be given up on.
+      auto last_frame = std::make_shared<std::atomic<std::chrono::steady_clock::rep>>(
+        std::chrono::steady_clock::now().time_since_epoch().count()
+      );
       auto signal = [av_capture capture:^(CMSampleBufferRef sampleBuffer) {
+        last_frame->store(std::chrono::steady_clock::now().time_since_epoch().count());
         auto new_sample_buffer = std::make_shared<av_sample_buf_t>(sampleBuffer);
         auto new_pixel_buffer = std::make_shared<av_pixel_buf_t>(new_sample_buffer->buf);
 
@@ -171,8 +189,19 @@ namespace platf {
       std::optional<std::chrono::steady_clock::time_point> asleep_since;
       while (dispatch_semaphore_wait(signal, dispatch_timeout_from_now(capture_poll_interval)) != 0) {
         // A capture card is not a display; display_id is meaningless for it, so the sleep dance
-        // (which reads CGDisplayIsAsleep) does not apply — just keep waiting for frames.
+        // (which reads CGDisplayIsAsleep) does not apply. Its equivalent is the signal going
+        // away: give up on a card that has been quiet too long, the same way as on a display
+        // that stays asleep, so the wait stays bounded. Seen 2026-10-02: the phone feeding the
+        // card went dark, the client disconnected, and Sunshine trapped itself ten seconds later.
         if (is_camera) {
+          const std::chrono::steady_clock::time_point last {std::chrono::steady_clock::duration {last_frame->load()}};
+          if (std::chrono::steady_clock::now() - last > capture_device_frame_patience) {
+            BOOST_LOG(warning) << "Capture device delivered no frames for "sv
+                               << std::chrono::duration_cast<std::chrono::seconds>(capture_device_frame_patience).count()
+                               << "s (no signal?); ending the session."sv;
+            [av_capture stopCapture:signal];
+            return capture_e::error;
+          }
           continue;
         }
         if (CGDisplayIsAsleep(display_id)) {
