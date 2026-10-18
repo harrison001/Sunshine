@@ -3132,7 +3132,10 @@ namespace video {
       need_idr = true;
 
       uint8_t header[16];
-      while (read_exact(fd, header, sizeof(header), stop)) {
+      // read_exact only polls `stop` when a read times out, and a live source never lets it time
+      // out, so check on every access unit too; otherwise a session that ends while frames are
+      // still flowing never returns and Sunshine aborts with "Hang detected".
+      while (!stop() && read_exact(fd, header, sizeof(header), stop)) {
         uint32_t len = header[0] | (header[1] << 8) | (header[2] << 16) | (uint32_t(header[3]) << 24);
         bool idr = header[4] & 1;
         if (len == 0 || len > 32 * 1024 * 1024) {
