@@ -7,9 +7,18 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cerrno>
+#include <cstring>
+#include <functional>
 #include <list>
 #include <thread>
 #include <utility>
+
+#ifndef _WIN32
+  #include <sys/socket.h>
+  #include <sys/un.h>
+  #include <unistd.h>
+#endif
 
 // lib includes
 #include <boost/pointer_cast.hpp>
@@ -3021,6 +3030,147 @@ namespace video {
     }
   }
 
+#ifndef _WIN32
+  namespace {
+    /**
+     * @brief Read exactly `len` bytes, polling `stop` whenever the socket read times out.
+     * @return true when all bytes arrived; false on EOF, error, or stop.
+     */
+    bool read_exact(int fd, uint8_t *buf, size_t len, const std::function<bool()> &stop) {
+      size_t got = 0;
+      while (got < len) {
+        auto n = ::recv(fd, buf + got, len - got, 0);
+        if (n > 0) {
+          got += static_cast<size_t>(n);
+          continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+          if (stop()) {
+            return false;
+          }
+          continue;
+        }
+        return false;
+      }
+      return true;
+    }
+
+    int env_int(const char *name, int fallback) {
+      auto v = std::getenv(name);
+      return v && *v ? std::atoi(v) : fallback;
+    }
+  }  // namespace
+
+  /**
+   * @brief Pass-through video source: forward already-encoded H.264 access units to the client.
+   *
+   * Used when SUNSHINE_EXTERNAL_H264 names a unix socket (e.g. the iPhone USB screen capture
+   * relay). Skips display capture and encoding entirely, so the host does no video work beyond
+   * packetization. Each message is a 16-byte header (u32 payload length, u32 flags with bit 0 =
+   * IDR, u64 timestamp in ns, all little-endian) followed by an Annex-B access unit; IDR access
+   * units carry their SPS/PPS. The source cannot produce an IDR on demand, so an IDR request
+   * drops frames until the source's next natural IDR.
+   *
+   * @param mail Session mail bus.
+   * @param config Client-requested video configuration.
+   * @param channel_data Opaque channel data passed to packets.
+   * @param path Unix socket path of the external source.
+   */
+  void capture_external(safe::mail_t mail, const config_t &config, void *channel_data, const std::string &path) {
+    auto shutdown_event = mail->event<bool>(mail::shutdown);
+    auto idr_events = mail->event<bool>(mail::idr);
+    auto touch_port_event = mail->event<input::touch_port_t>(mail::touch_port);
+    auto hdr_event = mail->event<hdr_info_t>(mail::hdr);
+    auto packets = mail::man->queue<packet_t>(mail::video_packets);
+
+    if (config.videoFormat != 0) {
+      BOOST_LOG(warning) << "External H.264 source: client asked for video format "sv << config.videoFormat << ", but only H.264 can be passed through"sv;
+    }
+
+    // Absolute mouse/touch input still lands on the X display the source is mirrored to,
+    // so describe that display (defaults to the stream size) for coordinate scaling.
+    float wd = env_int("SUNSHINE_EXTERNAL_WIDTH", config.width);
+    float hd = env_int("SUNSHINE_EXTERNAL_HEIGHT", config.height);
+    auto scalar = std::fminf(config.width / wd, config.height / hd);
+    touch_port_event->raise(input::touch_port_t {
+      {0, 0, config.width, config.height, 0, 0},
+      static_cast<int>(wd),
+      static_cast<int>(hd),
+      (config.width - scalar * wd) * 0.5f,
+      (config.height - scalar * hd) * 0.5f,
+      1.0f / scalar,
+      1.0f,
+      0,
+      0
+    });
+    hdr_event->raise(std::make_unique<hdr_info_raw_t>(false));
+
+    platf::adjust_thread_priority(platf::thread_priority_e::high);
+    BOOST_LOG(info) << "External H.264 source: reading access units from "sv << path;
+
+    auto stop = [&]() {
+      return shutdown_event->peek();
+    };
+    int64_t frame_nr = 1;
+    bool need_idr = true;
+    int64_t dropped = 0;
+
+    while (!stop()) {
+      int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+      sockaddr_un addr {};
+      addr.sun_family = AF_UNIX;
+      std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+      if (fd < 0 || ::connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
+        if (fd >= 0) {
+          ::close(fd);
+        }
+        std::this_thread::sleep_for(200ms);
+        continue;
+      }
+      timeval tv {0, 200 * 1000};  // wake up regularly to notice shutdown
+      ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      need_idr = true;
+
+      uint8_t header[16];
+      while (read_exact(fd, header, sizeof(header), stop)) {
+        uint32_t len = header[0] | (header[1] << 8) | (header[2] << 16) | (uint32_t(header[3]) << 24);
+        bool idr = header[4] & 1;
+        if (len == 0 || len > 32 * 1024 * 1024) {
+          BOOST_LOG(error) << "External H.264 source: bad access unit length "sv << len;
+          break;
+        }
+        std::vector<uint8_t> data(len);
+        if (!read_exact(fd, data.data(), len, stop)) {
+          break;
+        }
+
+        while (idr_events->peek()) {
+          idr_events->pop();
+          need_idr = true;
+        }
+        if (need_idr && !idr) {
+          ++dropped;
+          continue;
+        }
+        if (need_idr) {
+          BOOST_LOG(debug) << "External H.264 source: resuming at IDR, dropped "sv << dropped << " frames"sv;
+          need_idr = false;
+        }
+
+        auto packet = std::make_unique<packet_raw_generic>(std::move(data), frame_nr++, idr);
+        packet->channel_data = channel_data;
+        packet->frame_timestamp = std::chrono::steady_clock::now();
+        packets->raise(std::move(packet));
+      }
+      ::close(fd);
+      if (!stop()) {
+        BOOST_LOG(warning) << "External H.264 source: connection lost, reconnecting"sv;
+        std::this_thread::sleep_for(200ms);
+      }
+    }
+  }
+#endif
+
   /**
    * @brief Capture and encode video for a streaming session.
    *
@@ -3033,6 +3183,12 @@ namespace video {
     config_t config,
     void *channel_data
   ) {
+#ifndef _WIN32
+    if (auto path = std::getenv("SUNSHINE_EXTERNAL_H264"); path && *path) {
+      capture_external(std::move(mail), config, channel_data, path);
+      return;
+    }
+#endif
     config = resolve_dynamic_range(*chosen_encoder, config);
 
     auto idr_events = mail->event<bool>(mail::idr);
