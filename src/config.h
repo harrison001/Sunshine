@@ -260,6 +260,8 @@ namespace config {
 
     // Limit the packetsize to avoid fragmentation on a low MTU link
     int packetsize;  ///< Maximum payload size for network packets.
+
+    int video_pacing_mbps;  ///< Pace video packets at this rate (Mbit/s); 0 keeps the default (~800 Mbit/s, effectively unpaced).
   };
 
   /**

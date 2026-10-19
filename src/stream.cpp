@@ -1620,11 +1620,30 @@ namespace stream {
       auto max_data_per_fec_block = max_data_shards_per_fec_block * blocksize;
       auto fec_blocks_needed = (payload.size() + (max_data_per_fec_block - 1)) / max_data_per_fec_block;
 
-      // If the number of FEC blocks needed exceeds the protocol limit, turn off FEC for this frame.
-      // For normal FEC percentages, this should only happen for enormous frames (over 800 packets at 20%).
+      // If the number of FEC blocks needed exceeds the protocol limit, first try a lower FEC percentage
+      // that still fits in MAX_FEC_BLOCKS, so enormous frames keep some protection instead of none.
+      // Pass-through sources (e.g. an iPhone's own encoder) emit 400-900 KB keyframes every ~0.5 s;
+      // sending those with no FEC at all means one lost packet on a lossy WAN costs the whole frame.
       if (fec_blocks_needed > MAX_FEC_BLOCKS) {
-        BOOST_LOG(warning) << "Skipping FEC for abnormally large encoded frame (needed "sv << fec_blocks_needed << " FEC blocks)"sv;
-        fecPercentage = 0;
+        const auto total_shards = (payload.size() + (blocksize - 1)) / blocksize;
+        const auto shards_per_block = (total_shards + (MAX_FEC_BLOCKS - 1)) / MAX_FEC_BLOCKS;
+        const auto min_parity = (size_t) std::max(session->config.minRequiredFecPackets, 0);
+        int fitted = 0;
+        for (int f = fecPercentage; f >= 1; --f) {
+          const auto max_shards = (size_t) ((DATA_SHARDS_MAX * 100) / (100 + f));
+          const auto parity = std::max<size_t>((shards_per_block * f + 99) / 100, min_parity);
+          if (shards_per_block <= max_shards && shards_per_block + parity <= (size_t) DATA_SHARDS_MAX) {
+            fitted = f;
+            break;
+          }
+        }
+        if (fitted > 0) {
+          BOOST_LOG(verbose) << "Large frame: lowering FEC from "sv << fecPercentage << "% to "sv << fitted << "% to fit "sv << MAX_FEC_BLOCKS << " FEC blocks"sv;
+          fecPercentage = fitted;
+        } else {
+          BOOST_LOG(warning) << "Skipping FEC for abnormally large encoded frame (needed "sv << fec_blocks_needed << " FEC blocks)"sv;
+          fecPercentage = 0;
+        }
         fec_blocks_needed = MAX_FEC_BLOCKS;
       }
 
@@ -1658,6 +1677,13 @@ namespace stream {
       try {
         // Use around 80% of 1Gbps          1Gbps            percent    ms     packet      byte
         size_t ratecontrol_packets_in_1ms = std::giga::num * 80 / 100 / 1000 / blocksize / 8;
+        // Optional explicit pacing rate. A large keyframe sent at near line rate overflows the queue of a
+        // slow uplink (2.4 GHz Wi-Fi, cellular) and loses a burst of packets; pacing at about the bottleneck
+        // rate costs no extra latency there and keeps the frame intact.
+        const bool paced = config::stream.video_pacing_mbps > 0;
+        if (paced) {
+          ratecontrol_packets_in_1ms = std::max<size_t>(1, (size_t) config::stream.video_pacing_mbps * std::mega::num / 1000 / blocksize / 8);
+        }
 
         // Send less than 64K in a single batch.
         // On Windows, batches above 64K seem to bypass SO_SNDBUF regardless of its size,
@@ -1668,6 +1694,10 @@ namespace stream {
         // unusually small packet size.
         // Generic Segmentation Offload on Linux can't do more than 64.
         send_batch_size = std::min<size_t>(64, send_batch_size);
+        if (paced) {
+          // Send ~2 ms worth at a time so the pacing is smooth rather than 64-packet bursts.
+          send_batch_size = std::max<size_t>(1, std::min(send_batch_size, ratecontrol_packets_in_1ms * 2));
+        }
 
         // Don't ignore the last ratecontrol group of the previous frame
         auto ratecontrol_frame_start = std::max(ratecontrol_next_frame_start, std::chrono::steady_clock::now());
