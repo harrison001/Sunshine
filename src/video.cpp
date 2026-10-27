@@ -3068,8 +3068,11 @@ namespace video {
    * relay). Skips display capture and encoding entirely, so the host does no video work beyond
    * packetization. Each message is a 16-byte header (u32 payload length, u32 flags with bit 0 =
    * IDR, u64 timestamp in ns, all little-endian) followed by an Annex-B access unit; IDR access
-   * units carry their SPS/PPS. The source cannot produce an IDR on demand, so an IDR request
-   * drops frames until the source's next natural IDR.
+   * units carry their SPS/PPS. An IDR request drops frames until the source's next IDR.
+   *
+   * The source may be an encoder that can do more (the gateway's GPU transcoder), so Sunshine also
+   * writes text lines back on the socket: `bitrate <kbps>` (the client's requested bitrate) after
+   * connecting, and `idr` on every IDR request. A plain relay reads and ignores them.
    *
    * @param mail Session mail bus.
    * @param config Client-requested video configuration.
@@ -3130,6 +3133,11 @@ namespace video {
       timeval tv {0, 200 * 1000};  // wake up regularly to notice shutdown
       ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
       need_idr = true;
+      // tell the source what the client asked for; best effort, never blocks the stream
+      auto tell = [fd](const std::string &line) {
+        ::send(fd, line.data(), line.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+      };
+      tell("bitrate " + std::to_string(config.bitrate) + "\n");
 
       uint8_t header[16];
       // read_exact only polls `stop` when a read times out, and a live source never lets it time
@@ -3147,9 +3155,14 @@ namespace video {
           break;
         }
 
+        bool asked = false;
         while (idr_events->peek()) {
           idr_events->pop();
           need_idr = true;
+          asked = true;
+        }
+        if (asked) {
+          tell("idr\n");
         }
         if (need_idr && !idr) {
           ++dropped;
