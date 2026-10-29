@@ -4,6 +4,7 @@
  */
 // standard includes
 #include <bitset>
+#include <chrono>
 #include <sstream>
 #include <thread>
 
@@ -66,6 +67,9 @@ namespace platf {
    */
   struct mic_attr_t: public mic_t {
     util::safe_ptr<pa_simple, pa_simple_free> mic;  ///< PulseAudio simple recording stream for microphone capture.
+    std::uint64_t reads = 0;  ///< Samples read, to check the backlog every so often.
+    std::chrono::steady_clock::time_point last_log = std::chrono::steady_clock::now();  ///< Last backlog log line.
+    std::uint32_t flushes = 0;  ///< Backlog flushes since the last log line.
 
     /**
      * @brief Deliver a captured audio sample to Sunshine's audio pipeline.
@@ -82,6 +86,26 @@ namespace platf {
         BOOST_LOG(error) << "pa_simple_read() failed: "sv << pa_strerror(status);
 
         return capture_e::error;
+      }
+
+      // Recording backlog guard (TracePort, 2026-10-29): the sound fell seconds behind the picture
+      // after minutes of playback, cleared only by reconnecting (a new recording stream), not by
+      // muting on the client. Check what is waiting in this stream every ~100 ms; past 200 ms,
+      // drop it and continue from now — late sound is worse than a skipped moment.
+      if (++reads % 20 == 0) {
+        int lat_status;
+        auto latency = pa_simple_get_latency(mic.get(), &lat_status);
+        if (latency != (pa_usec_t) -1 && latency > 200000) {
+          pa_simple_flush(mic.get(), &lat_status);
+          ++flushes;
+          BOOST_LOG(warning) << "Audio capture backlog "sv << latency / 1000 << " ms: flushed to catch up"sv;
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_log >= 10s) {
+          BOOST_LOG(info) << "Audio capture: backlog "sv << (latency == (pa_usec_t) -1 ? -1 : (long long) (latency / 1000)) << " ms, "sv << flushes << " flush(es) in the last 10 s"sv;
+          last_log = now;
+          flushes = 0;
+        }
       }
 
       return capture_e::ok;
