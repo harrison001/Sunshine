@@ -4,6 +4,8 @@
  */
 // standard includes
 #include <bitset>
+#include <algorithm>
+#include <cstdlib>
 #include <chrono>
 #include <sstream>
 #include <thread>
@@ -70,6 +72,9 @@ namespace platf {
     std::uint64_t reads = 0;  ///< Samples read, to check the backlog every so often.
     std::chrono::steady_clock::time_point last_log = std::chrono::steady_clock::now();  ///< Last backlog log line.
     std::uint32_t flushes = 0;  ///< Backlog flushes since the last log line.
+    std::uint64_t read_frames = 0;  ///< Frames read since the last log line.
+    std::chrono::steady_clock::duration longest_read {};  ///< Longest single read since the last log line.
+    int channels = 2;  ///< Channels in the stream (to count frames).
 
     /**
      * @brief Deliver a captured audio sample to Sunshine's audio pipeline.
@@ -82,29 +87,43 @@ namespace platf {
 
       auto buf = sample_buf.data();
       int status;
+      auto read_start = std::chrono::steady_clock::now();
       if (pa_simple_read(mic.get(), buf, sample_size * sizeof(float), &status)) {
         BOOST_LOG(error) << "pa_simple_read() failed: "sv << pa_strerror(status);
 
         return capture_e::error;
       }
 
-      // Recording backlog guard (TracePort, 2026-10-29): the sound fell seconds behind the picture
-      // after minutes of playback, cleared only by reconnecting (a new recording stream), not by
-      // muting on the client. Check what is waiting in this stream every ~100 ms; past 200 ms,
-      // drop it and continue from now — late sound is worse than a skipped moment.
+      // Recording backlog watch (TracePort, 2026-10-29): the sound fell seconds behind the picture
+      // after minutes of playback; reconnecting (a new recording stream) and pausing playback on
+      // the phone for a while cleared it, muting on the client did not. Log raw values every 10 s
+      // to find out why: the backlog in this stream, how much was read (10 s of audio is
+      // 10 * rate frames), and the longest single read. Flushing a backlog over
+      // SUNSHINE_AUDIO_FLUSH_MS is off unless that is set.
+      read_frames += sample_size / channels;
+      longest_read = std::max(longest_read, std::chrono::steady_clock::now() - read_start);
       if (++reads % 20 == 0) {
         int lat_status;
         auto latency = pa_simple_get_latency(mic.get(), &lat_status);
-        if (latency != (pa_usec_t) -1 && latency > 200000) {
+        static const long flush_ms = [] {
+          const char *v = std::getenv("SUNSHINE_AUDIO_FLUSH_MS");
+          return v ? std::atol(v) : 0L;
+        }();
+        if (flush_ms > 0 && latency != (pa_usec_t) -1 && latency > (pa_usec_t) flush_ms * 1000) {
           pa_simple_flush(mic.get(), &lat_status);
           ++flushes;
-          BOOST_LOG(warning) << "Audio capture backlog "sv << latency / 1000 << " ms: flushed to catch up"sv;
         }
         auto now = std::chrono::steady_clock::now();
         if (now - last_log >= 10s) {
-          BOOST_LOG(info) << "Audio capture: backlog "sv << (latency == (pa_usec_t) -1 ? -1 : (long long) (latency / 1000)) << " ms, "sv << flushes << " flush(es) in the last 10 s"sv;
+          auto secs = std::chrono::duration<double>(now - last_log).count();
+          BOOST_LOG(info) << "Audio capture: backlog "sv << (latency == (pa_usec_t) -1 ? -1LL : (long long) (latency / 1000))
+                          << " ms, read "sv << read_frames << " frames in "sv << secs << " s ("sv << (long long) (read_frames / secs)
+                          << "/s), longest read "sv << std::chrono::duration_cast<std::chrono::milliseconds>(longest_read).count()
+                          << " ms, flushes "sv << flushes;
           last_log = now;
           flushes = 0;
+          read_frames = 0;
+          longest_read = {};
         }
       }
 
@@ -124,6 +143,7 @@ namespace platf {
    */
   std::unique_ptr<mic_t> microphone(const std::uint8_t *mapping, int channels, std::uint32_t sample_rate, std::uint32_t frame_size, std::string source_name) {
     auto mic = std::make_unique<mic_attr_t>();
+    mic->channels = channels;
 
     pa_sample_spec ss {PA_SAMPLE_FLOAT32, sample_rate, (std::uint8_t) channels};
     pa_channel_map pa_map;
